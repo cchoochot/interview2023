@@ -3,15 +3,23 @@ package org.chakraphan;
 import org.openjdk.jmh.annotations.*;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map.Entry;
+import java.util.function.UnaryOperator;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 @State(Scope.Benchmark)
 public class Main {
 
+    private static final Logger logger = Logger.getLogger(Main.class.getName());
+
     // [ BEGIN jmh ]
 
-    private static final String JMH_TEST_STRING = "ÿaaaabbbcccccaaüüüüüüüüzzzzzz";
+    private static final String JMH_TEST_STRING = "aaaabcccccaa1110011111111kkkkkkkkkkkk22222zzzzzz99999111222333";
 
     @Setup
     public static void jmhSetup() {
@@ -24,22 +32,18 @@ public class Main {
         processV1(JMH_TEST_STRING);
     }
 
+
     @BenchmarkMode(Mode.Throughput)
     @Benchmark
     public void benchProcessV2() {
         processV2(JMH_TEST_STRING);
     }
 
-    @BenchmarkMode(Mode.Throughput)
-    @Benchmark
-    public void benchProcessV3() {
-        processV3(JMH_TEST_STRING);
-    }
-
     // [ END jmh]
 
     public static void main(String[] args) throws IOException {
-        execute();
+        final Main app = new Main();
+        app.execute();
 
         org.openjdk.jmh.Main.main(args);
     }
@@ -47,24 +51,36 @@ public class Main {
     /**
      * Verify the inputs with the expected results
      */
-    private static void execute() {
-        final String testString1 = JMH_TEST_STRING;
-        final String testResult1 = "1ÿ2a3b4a5c6z8ü";
+    private void execute() {
+        final String passedLogPrefix = "Passed testing string ";
 
-        if (!testResult1.equals(processV1(testString1))) throw new AssertionError("processV1 failed test1");
-        if (!testResult1.equals(processV2(testString1))) throw new AssertionError("processV2 failed test1");
-        if (!testResult1.equals(processV3(testString1))) throw new AssertionError("processV3 failed test1");
+        final String testString1 = "ÿaaaabbbcccccaaüüüüüüüüzzzzzz";
+        final String expectedResult1 = "1ÿ2a3b4a5c6z8ü";
+        assertTest(expectedResult1, testString1, this::processV1, "processV1 failed test1");
+        assertTest(expectedResult1, testString1, this::processV2, "processV2 failed test1");
+        logger.info(() -> passedLogPrefix + testString1);
 
 
-        String testString2 = "aaaabcccccaa111001111111122222zzzzzz";
-        String testResult2 = "1b202a314a525c6z81";
+        final String testString2 = "aaaabcccccaa111001111111122222zzzzzz";
+        final String expectedResult2 = "1b202a314a525c6z81";
+        assertTest(expectedResult2, testString2, this::processV1, "processV1 failed test2");
+        assertTest(expectedResult2, testString2, this::processV2, "processV2 failed test2");
+        logger.info(() -> passedLogPrefix + testString2);
 
-        if (!testResult2.equals(processV1(testString2)))
-            throw new AssertionError("processV1 failed test2: " + processV1(testString2));
-        if (!testResult2.equals(processV2(testString2)))
-            throw new AssertionError("processV2 failed test2: " + processV2(testString2));
-        if (!testResult2.equals(processV3(testString2)))
-            throw new AssertionError("processV3 failed test2: " + processV3(testString2));
+
+        // test input with some characters over 10 in a row
+        final String testString3 = "aaaabcccccaa1110011111111kkkkkkkkkkkk22222zzzzzz";
+        final String expectedResult3 = "1b202a314a525c6z8112k";
+        assertTest(expectedResult3, testString3, this::processV1, "processV1 failed test3");
+        assertTest(expectedResult3, testString3, this::processV2, "processV2 failed test3");
+        logger.info(() -> passedLogPrefix + testString3);
+    }
+
+    private void assertTest(String expected, String input, UnaryOperator<String> func, String failedMessage) {
+        final String result = func.apply(input);
+        if (!expected.equals(result)) {
+            throw new AssertionError(failedMessage);
+        }
     }
 
     /**
@@ -74,7 +90,7 @@ public class Main {
      * @param input input string
      * @return the processed output string
      */
-    private static String processV1(String input) {
+    private String processV1(String input) {
         if (input == null || input.isBlank()) {
             return "";
         }
@@ -99,7 +115,6 @@ public class Main {
 
         list.add(new AbstractMap.SimpleImmutableEntry<>(ch, count));
 
-        // 1b2a4a5c6z
         return convertResultListToString(list);
     }
 
@@ -109,87 +124,48 @@ public class Main {
      * @param list the list of character-count entries to be processed
      * @return the result string
      */
-    private static String convertResultListToString(List<AbstractMap.SimpleImmutableEntry<Character, Integer>> list) {
+    private String convertResultListToString(List<AbstractMap.SimpleImmutableEntry<Character, Integer>> list) {
         final Comparator<AbstractMap.SimpleImmutableEntry<Character, Integer>> comparatorCount = Comparator.comparingInt(AbstractMap.SimpleImmutableEntry::getValue);
         return list.stream()
-                .sorted(comparatorCount.thenComparing(Map.Entry.comparingByKey())) // sort by count first
+                .sorted(comparatorCount.thenComparing(Entry.comparingByKey())) // sort by count first
                 .map(entry -> "" + entry.getValue() + entry.getKey()) // then sort by character
                 .collect(Collectors.joining());
     }
 
-    /**
-     * This is an improved version after I got back to review my logic later.
-     * It uses a bit simpler logic on sorting so the performance should be better.
-     *
-     * @param input the input string
-     * @return the result string
-     */
-    private static String processV2(String input) {
+    private String processV2(String input) {
         if (input == null || input.isBlank()) {
             return "";
         }
 
-        List<String> list = new ArrayList<>();
+        // set initial ArrayList size to be the same as input string for the worst case
+        final int length = input.length();
+        List<AbstractMap.SimpleImmutableEntry<Character, Integer>> list = new ArrayList<>(length);
 
         char ch = input.charAt(0);
         int count = 1;
-
-        for (int i = 1, length = input.length(); i < length; i++) {
+        for (int i = 1; i < length; i++) {
             char thisChar = input.charAt(i);
             if (ch == thisChar) {
                 // increase counter
                 count++;
             } else {
-                list.add("" + count + ch);
+                list.add(new AbstractMap.SimpleImmutableEntry<>(ch, count));
 
                 // reset counter
                 count = 1;
-
                 ch = thisChar;
             }
         }
 
+        list.add(new AbstractMap.SimpleImmutableEntry<>(ch, count));
 
-        list.add("" + count + ch);
-        return list.stream().sorted().collect(Collectors.joining());
+        return convertResultListToStringV2(list);
     }
 
-    /**
-     * This is on top of v2 but implemented with code point.
-     *
-     * @param input the input string
-     * @return the result string
-     */
-    private static String processV3(String input) {
-        if (input == null || input.isBlank()) {
-            return "";
-        }
-
-        final List<String> list = new ArrayList<>();
-
-        int codePoint = input.codePointAt(0);
-        int count = 1;
-
-        int idx;
-        int currentCodePoint;
-        int length = input.length();
-        for (idx = 1; idx < length; idx++) {
-            currentCodePoint = input.codePointAt(idx);
-
-            if (codePoint == currentCodePoint) {
-                count++;
-                continue;
-            }
-
-            list.add("" + count + input.charAt(idx - 1));
-
-            count = 1;
-            codePoint = currentCodePoint;
-        }
-
-        list.add("" + count + input.charAt(idx - 1));
-
-        return list.stream().sorted()
+    private String convertResultListToStringV2(List<AbstractMap.SimpleImmutableEntry<Character, Integer>> list) {
+        return list.stream()
+                .sorted(Entry.<Character, Integer>comparingByValue().thenComparing(Entry.comparingByKey())) // update comparable usage
+                .map(entry -> "" + entry.getValue() + entry.getKey())
                 .collect(Collectors.joining());
     }
 }
